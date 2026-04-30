@@ -144,17 +144,6 @@
     .status-badge.ready { background: rgba(63,185,80,0.2); color: var(--success); }
     .status-badge.processing { background: rgba(255,170,0,0.2); color: var(--warn); }
 
-    /* Target highlight on globe */
-    .target-ring {
-      position: fixed; pointer-events: none; z-index: 5;
-      width: 60px; height: 60px; border: 2px solid var(--accent);
-      border-radius: 50%; animation: target-pulse 2s infinite;
-    }
-    @keyframes target-pulse {
-      0%, 100% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(1.3); opacity: 0.5; }
-    }
-
     /* Loading */
     #loading {
       position: fixed; inset: 0; background: var(--space-blue);
@@ -199,11 +188,6 @@
       #outputPanel { display: none; }
     }
   </style>
-  
-  <!-- Dependencies -->
-  <script src="//unpkg.com/three@0.160.0/build/three.min.js"></script>
-  <script src="//unpkg.com/satellite.js/dist/satellite.min.js"></script>
-  <script src="//unpkg.com/globe.gl@2.30.0"></script>
 </head>
 <body>
 
@@ -239,6 +223,7 @@
   <div class="chip"><span class="dot" id="statusDot"></span> <span id="statusText">OPERATIONAL</span></div>
   <div class="chip" id="timeDisplay">--:--:-- UTC</div>
   <div class="spacer"></div>
+  <button class="btn" onclick="focusJackal()">🎯 JACKAL</button>
   <button class="btn" onclick="focusISS()">📍 ISS</button>
   <button class="btn" onclick="resetView()">🌍 Reset</button>
   <button class="btn" onclick="showConfig()">⚙ API</button>
@@ -259,7 +244,7 @@
   <div class="panel-body">
     <textarea id="intentInput" class="intent-input" placeholder="Describe your mission objective...
 
-Example: Track ISS and alert if it passes within 50km of any other tracked object."></textarea>
+Example: Track JACKAL-02 and alert if it passes within 50km of any debris object."></textarea>
 
     <div class="suggestions">
       <h4>Quick Commands</h4>
@@ -321,24 +306,36 @@ Example: Track ISS and alert if it passes within 50km of any other tracked objec
   </div>
 </div>
 
+<!-- Dependencies - loaded in correct order -->
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script src="https://unpkg.com/satellite.js@5.0.0/dist/satellite.min.js"></script>
+<script src="https://unpkg.com/globe.gl@2.30.0/dist/globe.gl.min.js"></script>
+
 <script>
 /* ========== CONFIG ========== */
 const EARTH_RADIUS_KM = 6371;
 const SAT_SIZE = 60;
 const TIME_STEP = 3000;
 
+// True Anomaly's JACKAL-02 TLE (NORAD 59134)
+const JACKAL_TLE = {
+  name: 'JACKAL-02 (TRUE ANOMALY)',
+  tle1: '1 59134U 24043AN  26057.28754966  .00022056  00000-0  51859-3 0  9998',
+  tle2: '2 59134  97.5392 199.0222 0007321 245.5626 114.4857 15.41981657110501'
+};
+
 const SUGGESTIONS = [
-  { icon: "🛰", text: "Track ISS and report position every 5 minutes" },
-  { icon: "⚠️", text: "Alert if any object approaches within 100km of ISS" },
-  { icon: "🔍", text: "Identify all objects in retrograde orbit" },
-  { icon: "📡", text: "Calculate optimal comms window for ground station at 40°N, 74°W" },
-  { icon: "🎯", text: "Find closest approach between ISS and any Starlink satellite" },
-  { icon: "🔄", text: "Monitor debris field and flag collision risks above 1e-5" }
+  { icon: "🎯", text: "Track JACKAL-02 and report telemetry every 5 minutes" },
+  { icon: "⚠️", text: "Alert if any object approaches within 100km of JACKAL-02" },
+  { icon: "🛰", text: "Calculate next ISS flyby within sensor range of JACKAL" },
+  { icon: "📡", text: "Establish optimal comms window for JACKAL downlink" },
+  { icon: "🔍", text: "Identify all objects in similar orbital plane to JACKAL" },
+  { icon: "🔄", text: "Plan station-keeping maneuver for JACKAL-02" }
 ];
 
-const SYSTEM_PROMPT = `You are Mosaic Copilot, an AI mission planning system for autonomous spacecraft operations. You have real-time awareness of orbital objects via TLE data.
+const SYSTEM_PROMPT = `You are Mosaic Copilot, an AI mission planning system for True Anomaly's autonomous spacecraft operations. You have real-time awareness of orbital objects including True Anomaly's JACKAL-02 satellite (NORAD 59134).
 
-Current tracked objects include: ISS (ZARYA), Starlink satellites, various debris, and other LEO objects.
+JACKAL-02 is True Anomaly's autonomous orbital vehicle used for space domain awareness and proximity operations. It's in a ~540km sun-synchronous orbit.
 
 When given a mission objective:
 1. Provide a concise mission summary
@@ -347,11 +344,12 @@ When given a mission objective:
 4. Include contingency responses
 5. Output a structured JSON with mission_id, objective, assets, timeline, constraints, triggers, autonomy_level (1-5)
 
-Be operationally precise. Use proper aerospace terminology. Reference real tracked objects when relevant.`;
+Be operationally precise. Use proper aerospace terminology. Reference JACKAL-02 and other tracked objects when relevant.`;
 
 /* ========== STATE ========== */
 let world, satData = [];
 let selectedSat = null;
+let jackalSat = null;
 let config = {
   endpoint: localStorage.getItem('mosaic_endpoint') || 'https://api.openai.com/v1/chat/completions',
   apiKey: localStorage.getItem('mosaic_apikey') || '',
@@ -371,32 +369,27 @@ async function initGlobe() {
   loadStatus.textContent = "Initializing 3D orbital view...";
   
   world = Globe()(document.getElementById('globe'))
-    .globeImageUrl('//unpkg.com/three-globe/example/img/earth-blue-marble.jpg')
-    .bumpImageUrl('//unpkg.com/three-globe/example/img/earth-topology.png')
-    .backgroundImageUrl('//unpkg.com/three-globe/example/img/night-sky.png')
+    .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg')
+    .bumpImageUrl('https://unpkg.com/three-globe/example/img/earth-topology.png')
+    .backgroundImageUrl('https://unpkg.com/three-globe/example/img/night-sky.png')
     .objectLat('lat')
     .objectLng('lng')
     .objectAltitude('alt')
     .objectLabel(d => `<div style="background:rgba(0,0,0,0.8);padding:8px 12px;border-radius:8px;font-size:12px;">
-      <b style="color:#00d4ff;">${d.name}</b><br/>
+      <b style="color:${d.color || '#00d4ff'};">${d.name}</b><br/>
       Alt: ${(d.alt * EARTH_RADIUS_KM).toFixed(0)} km
     </div>`);
 
   // Custom satellite mesh
   const satGeometry = new THREE.OctahedronGeometry(SAT_SIZE * world.getGlobeRadius() / EARTH_RADIUS_KM / 2, 0);
-  const satMaterial = new THREE.MeshLambertMaterial({ color: '#00d4ff', transparent: true, opacity: 0.8 });
   world.objectThreeObject(d => {
-    const mesh = new THREE.Mesh(satGeometry, satMaterial.clone());
-    if (d.name.includes('ISS')) {
-      mesh.material.color.set('#3fb950');
-      mesh.scale.set(2, 2, 2);
-    } else if (d.name.includes('STARLINK')) {
-      mesh.material.color.set('#ffaa00');
-      mesh.material.opacity = 0.6;
-    } else if (d.name.includes('DEB')) {
-      mesh.material.color.set('#ff4444');
-      mesh.material.opacity = 0.4;
-    }
+    const material = new THREE.MeshLambertMaterial({ 
+      color: d.color || '#00d4ff', 
+      transparent: true, 
+      opacity: d.opacity || 0.8 
+    });
+    const mesh = new THREE.Mesh(satGeometry, material);
+    if (d.scale) mesh.scale.set(d.scale, d.scale, d.scale);
     return mesh;
   });
 
@@ -409,26 +402,82 @@ async function initGlobe() {
 
   // Load TLE data
   loadStatus.textContent = "Fetching orbital elements (TLE)...";
-  const rawData = await fetch('//globe.gl/example/datasets/space-track-leo.txt').then(r => r.text());
-  const tleData = rawData.replace(/\r/g, '').split(/\n(?=[^12])/).filter(d => d).map(tle => tle.split('\n'));
   
-  loadStatus.textContent = "Propagating satellite positions...";
-  satData = tleData.map(([name, ...tle]) => {
+  try {
+    const rawData = await fetch('https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle').then(r => r.text());
+    const tleLines = rawData.trim().split('\n');
+    
+    loadStatus.textContent = "Propagating satellite positions...";
+    
+    for (let i = 0; i < tleLines.length - 2; i += 3) {
+      const name = tleLines[i].trim();
+      const tle1 = tleLines[i + 1];
+      const tle2 = tleLines[i + 2];
+      
+      if (!tle1 || !tle2 || !tle1.startsWith('1 ') || !tle2.startsWith('2 ')) continue;
+      
+      try {
+        const satrec = satellite.twoline2satrec(tle1, tle2);
+        const testProp = satellite.propagate(satrec, new Date());
+        if (!testProp.position) continue;
+        
+        let color = '#00d4ff';
+        let opacity = 0.6;
+        let scale = 1;
+        
+        if (name.includes('ISS')) {
+          color = '#3fb950'; scale = 2.5; opacity = 1;
+        } else if (name.includes('STARLINK')) {
+          color = '#ffaa00'; opacity = 0.4;
+        } else if (name.includes('DEB') || name.includes('DEBRIS')) {
+          color = '#ff4444'; opacity = 0.3;
+        }
+        
+        satData.push({
+          satrec, name, lat: 0, lng: 0, alt: 0.1, color, opacity, scale
+        });
+      } catch {}
+    }
+    
+    // Add JACKAL-02 manually with special styling
     try {
-      return {
-        satrec: satellite.twoline2satrec(...tle),
-        name: name.trim().replace(/^0 /, ''),
-        lat: 0, lng: 0, alt: 0.1
+      const jackalSatrec = satellite.twoline2satrec(JACKAL_TLE.tle1, JACKAL_TLE.tle2);
+      jackalSat = {
+        satrec: jackalSatrec,
+        name: JACKAL_TLE.name,
+        lat: 0, lng: 0, alt: 0.1,
+        color: '#ff00ff',
+        opacity: 1,
+        scale: 3
       };
-    } catch { return null; }
-  }).filter(d => {
-    if (!d) return false;
+      satData.unshift(jackalSat); // Add at beginning
+    } catch (e) {
+      console.warn('Failed to add JACKAL:', e);
+    }
+    
+  } catch (e) {
+    console.warn('Failed to fetch Celestrak, using fallback:', e);
+    loadStatus.textContent = "Using cached orbital data...";
+    
+    // Fallback: just add JACKAL and some sample sats
     try {
-      const eci = satellite.propagate(d.satrec, new Date());
-      return eci && eci.position;
-    } catch { return false; }
-  }).slice(0, 2000);
-
+      const jackalSatrec = satellite.twoline2satrec(JACKAL_TLE.tle1, JACKAL_TLE.tle2);
+      jackalSat = {
+        satrec: jackalSatrec,
+        name: JACKAL_TLE.name,
+        lat: 0, lng: 0, alt: 0.1,
+        color: '#ff00ff',
+        opacity: 1,
+        scale: 3
+      };
+      satData.push(jackalSat);
+    } catch (e) {
+      console.error('Failed to add JACKAL:', e);
+    }
+  }
+  
+  // Limit to 1500 for performance
+  satData = satData.slice(0, 1500);
   satCountEl.textContent = satData.length;
 
   // Animation loop
@@ -454,10 +503,9 @@ async function initGlobe() {
       } catch {}
     });
     
-    world.objectsData(satData.filter(d => d.lat !== undefined));
+    world.objectsData(satData.filter(d => d.lat !== undefined && !isNaN(d.lat)));
     
-    // Update selected satellite display
-    if (selectedSat) {
+    if (selectedSat && !isNaN(selectedSat.alt)) {
       selectedSatEl.textContent = `${selectedSat.name} (${(selectedSat.alt * EARTH_RADIUS_KM).toFixed(0)}km)`;
     }
   })();
@@ -490,6 +538,14 @@ function setStatus(status, text) {
   statusText.textContent = text;
   badge.className = 'status-badge ' + status;
   badge.textContent = status === 'processing' ? 'Processing' : 'Ready';
+}
+
+function focusJackal() {
+  if (jackalSat) {
+    selectedSat = jackalSat;
+    selectedSatEl.textContent = jackalSat.name;
+    world.pointOfView({ lat: jackalSat.lat, lng: jackalSat.lng, altitude: 1.0 }, 1000);
+  }
 }
 
 function focusISS() {
@@ -525,10 +581,14 @@ async function execute() {
   document.getElementById('missionCard').style.display = 'none';
 
   // Build context with current satellite data
-  const issData = satData.find(s => s.name.includes('ISS'));
-  const contextMsg = issData 
-    ? `Current ISS position: ${issData.lat.toFixed(2)}°N, ${issData.lng.toFixed(2)}°E, altitude ${(issData.alt * EARTH_RADIUS_KM).toFixed(0)}km. Total tracked objects: ${satData.length}.`
-    : `Total tracked objects: ${satData.length}.`;
+  let contextMsg = `Total tracked objects: ${satData.length}.`;
+  if (jackalSat && !isNaN(jackalSat.lat)) {
+    contextMsg = `JACKAL-02 position: ${jackalSat.lat.toFixed(2)}°, ${jackalSat.lng.toFixed(2)}°, altitude ${(jackalSat.alt * EARTH_RADIUS_KM).toFixed(0)}km. ` + contextMsg;
+  }
+  const iss = satData.find(s => s.name.includes('ISS'));
+  if (iss && !isNaN(iss.lat)) {
+    contextMsg += ` ISS position: ${iss.lat.toFixed(2)}°, ${iss.lng.toFixed(2)}°, altitude ${(iss.alt * EARTH_RADIUS_KM).toFixed(0)}km.`;
+  }
 
   try {
     const response = await fetch(config.endpoint, {
