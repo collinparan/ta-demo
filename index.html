@@ -289,7 +289,7 @@ Example: Track JACKAL-02 and alert if it passes within 50km of any debris object
     <h3>API Configuration</h3>
     <label>
       <div class="label-text">Endpoint</div>
-      <input id="apiEndpoint" value="https://api.openai.com/v1/chat/completions" />
+      <input id="apiEndpoint" value="https://corsproxy.io/?https://api.openai.com/v1/chat/completions" />
     </label>
     <label>
       <div class="label-text">API Key</div>
@@ -351,7 +351,7 @@ let world, satData = [];
 let selectedSat = null;
 let jackalSat = null;
 let config = {
-  endpoint: localStorage.getItem('mosaic_endpoint') || 'https://api.openai.com/v1/chat/completions',
+  endpoint: localStorage.getItem('mosaic_endpoint') || 'https://corsproxy.io/?https://api.openai.com/v1/chat/completions',
   apiKey: localStorage.getItem('mosaic_apikey') || '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',
   model: localStorage.getItem('mosaic_model') || 'gpt-5.5'
 };
