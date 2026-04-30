@@ -350,6 +350,7 @@ Be operationally precise. Use proper aerospace terminology. Reference JACKAL-02 
 let world, satData = [];
 let selectedSat = null;
 let jackalSat = null;
+let followMode = false;
 let config = {
   endpoint: localStorage.getItem('mosaic_endpoint') || 'https://corsproxy.io/?https://api.openai.com/v1/chat/completions',
   apiKey: localStorage.getItem('mosaic_apikey') || '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',
@@ -507,6 +508,10 @@ async function initGlobe() {
     
     if (selectedSat && !isNaN(selectedSat.alt)) {
       selectedSatEl.textContent = `${selectedSat.name} (${(selectedSat.alt * EARTH_RADIUS_KM).toFixed(0)}km)`;
+      // Follow mode - continuously track the satellite
+      if (followMode) {
+        world.pointOfView({ lat: selectedSat.lat, lng: selectedSat.lng }, 0);
+      }
     }
   })();
 
@@ -543,7 +548,8 @@ function setStatus(status, text) {
 function focusJackal() {
   if (jackalSat) {
     selectedSat = jackalSat;
-    selectedSatEl.textContent = jackalSat.name;
+    followMode = true;
+    selectedSatEl.textContent = '🔒 ' + jackalSat.name;
     world.pointOfView({ lat: jackalSat.lat, lng: jackalSat.lng, altitude: 1.0 }, 1000);
   }
 }
@@ -552,13 +558,15 @@ function focusISS() {
   const iss = satData.find(s => s.name.includes('ISS') || s.name.includes('ZARYA'));
   if (iss) {
     selectedSat = iss;
-    selectedSatEl.textContent = iss.name;
+    followMode = true;
+    selectedSatEl.textContent = '🔒 ' + iss.name;
     world.pointOfView({ lat: iss.lat, lng: iss.lng, altitude: 1.2 }, 1000);
   }
 }
 
 function resetView() {
   selectedSat = null;
+  followMode = false;
   selectedSatEl.textContent = 'None';
   world.pointOfView({ lat: 20, lng: 0, altitude: 2.5 }, 1000);
 }
