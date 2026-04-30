@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Mosaic Copilot | Autonomous Mission Planning</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <style>
+    :root {
+      --glass: rgba(0,0,0,.65);
+      --blur: 14px;
+      --radius: 14px;
+      --accent: #00d4ff;
+      --accent-dim: rgba(0,212,255,0.2);
+      --success: #3fb950;
+      --warn: #ffaa00;
+      --danger: #ff4444;
+      --space-blue: #0a0a14;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: var(--space-blue); color: #fff; font-family: 'SF Pro Display', system-ui, -apple-system, sans-serif; overflow: hidden; }
+    
+    /* Globe container */
+    #globe { position: fixed; inset: 0; z-index: 0; }
+    
+    /* Top bar */
+    .topbar {
+      position: fixed; top: 14px; left: 16px; right: 16px;
+      display: flex; align-items: center; gap: 10px; z-index: 10;
+    }
+    .logo {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--glass); backdrop-filter: blur(var(--blur));
+      border-radius: 999px; padding: 10px 16px;
+      font-weight: 700; font-size: 15px; letter-spacing: 0.5px;
+    }
+    .logo svg { width: 24px; height: 24px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--glass); backdrop-filter: blur(var(--blur));
+      border-radius: 999px; padding: 8px 14px; font-weight: 600; font-size: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+    .dot.warn { background: var(--warn); animation: pulse 1s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .spacer { flex: 1; }
+    .btn {
+      border: 1px solid rgba(255,255,255,0.15); color: #fff; font-weight: 600;
+      cursor: pointer; padding: 8px 14px; border-radius: 999px; font-size: 12px;
+      background: rgba(255,255,255,0.08); backdrop-filter: blur(8px);
+      transition: all 0.2s;
+    }
+    .btn:hover { background: rgba(255,255,255,0.15); }
+
+    /* Satellite info bar */
+    #satInfo {
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+      background: var(--glass); backdrop-filter: blur(var(--blur));
+      border-radius: 999px; padding: 10px 20px; z-index: 10;
+      font-size: 12px; display: flex; gap: 20px; align-items: center;
+    }
+    #satInfo .stat { display: flex; align-items: center; gap: 6px; }
+    #satInfo .stat-value { font-weight: 700; color: var(--accent); }
+
+    /* Left panel - Mission Planning */
+    #missionPanel {
+      position: fixed; left: 16px; top: 70px; bottom: 70px; width: 380px;
+      background: var(--glass); backdrop-filter: blur(var(--blur));
+      border-radius: var(--radius); z-index: 10;
+      display: flex; flex-direction: column; overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .panel-header {
+      padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.08);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .panel-header h3 { font-size: 13px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; opacity: 0.7; }
+    .panel-body { flex: 1; overflow: auto; padding: 16px; }
+
+    .intent-input {
+      width: 100%; min-height: 100px; padding: 14px;
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px; color: #fff; font-size: 14px; line-height: 1.5;
+      resize: none; font-family: inherit;
+    }
+    .intent-input:focus { outline: none; border-color: var(--accent); }
+    .intent-input::placeholder { color: rgba(255,255,255,0.35); }
+
+    .suggestions { margin-top: 16px; }
+    .suggestions h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.5; margin-bottom: 10px; }
+    .sugg-list { display: flex; flex-direction: column; gap: 6px; }
+    .sugg {
+      padding: 10px 12px; background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06); border-radius: 8px;
+      cursor: pointer; transition: all 0.2s; font-size: 13px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .sugg:hover { background: var(--accent-dim); border-color: var(--accent); }
+    .sugg-icon { opacity: 0.6; font-size: 14px; }
+
+    .action-bar { margin-top: 16px; display: flex; gap: 10px; }
+    .action-bar .btn { flex: 1; justify-content: center; padding: 12px; }
+    .action-bar .btn.primary { background: var(--accent); color: #000; border-color: var(--accent); }
+    .action-bar .btn.primary:hover { background: #33e0ff; }
+
+    /* Right panel - Output */
+    #outputPanel {
+      position: fixed; right: 16px; top: 70px; bottom: 70px; width: 420px;
+      background: var(--glass); backdrop-filter: blur(var(--blur));
+      border-radius: var(--radius); z-index: 10;
+      display: flex; flex-direction: column; overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .output-section { margin-bottom: 16px; }
+    .output-section:last-child { margin-bottom: 0; }
+    .output-label {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+      color: var(--accent); margin-bottom: 8px; font-weight: 600;
+    }
+    .output-content {
+      background: rgba(0,0,0,0.3); border-radius: 8px; padding: 14px;
+      font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px;
+      line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+      max-height: 200px; overflow: auto;
+    }
+    .output-content.streaming { border-left: 2px solid var(--accent); }
+    .output-content.json { color: var(--accent); }
+
+    .mission-card {
+      background: linear-gradient(135deg, var(--accent-dim) 0%, rgba(0,212,255,0.02) 100%);
+      border: 1px solid rgba(0,212,255,0.3); border-radius: 10px; padding: 16px;
+      margin-bottom: 16px;
+    }
+    .mission-card h4 { font-size: 14px; margin-bottom: 10px; }
+    .mission-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .meta-item { font-size: 12px; }
+    .meta-item .label { opacity: 0.5; font-size: 10px; text-transform: uppercase; }
+    .meta-item .value { font-weight: 600; margin-top: 2px; }
+
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 10px; border-radius: 999px; font-size: 10px; font-weight: 600;
+    }
+    .status-badge.ready { background: rgba(63,185,80,0.2); color: var(--success); }
+    .status-badge.processing { background: rgba(255,170,0,0.2); color: var(--warn); }
+
+    /* Target highlight on globe */
+    .target-ring {
+      position: fixed; pointer-events: none; z-index: 5;
+      width: 60px; height: 60px; border: 2px solid var(--accent);
+      border-radius: 50%; animation: target-pulse 2s infinite;
+    }
+    @keyframes target-pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.3); opacity: 0.5; }
+    }
+
+    /* Loading */
+    #loading {
+      position: fixed; inset: 0; background: var(--space-blue);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 100; transition: opacity 0.5s;
+    }
+    #loading.hide { opacity: 0; pointer-events: none; }
+    #loading h1 { font-size: 1.8em; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
+    #loadStatus { opacity: 0.6; font-size: 14px; }
+    .spinner { width: 36px; height: 36px; border: 3px solid rgba(255,255,255,0.15); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Config modal */
+    #configModal {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+      z-index: 200; align-items: center; justify-content: center;
+    }
+    #configModal.show { display: flex; }
+    #configModal .modal {
+      background: var(--glass); backdrop-filter: blur(20px);
+      border-radius: var(--radius); padding: 24px; width: 380px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    #configModal h3 { margin-bottom: 20px; }
+    #configModal label { display: block; margin-bottom: 14px; }
+    #configModal .label-text { font-size: 11px; opacity: 0.6; margin-bottom: 6px; text-transform: uppercase; }
+    #configModal input {
+      width: 100%; padding: 10px 12px; background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
+      color: #fff; font-size: 13px;
+    }
+    #configModal input:focus { outline: none; border-color: var(--accent); }
+    #configModal .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+    #configModal .modal-actions .btn { flex: 1; padding: 10px; }
+
+    /* Responsive */
+    @media (max-width: 1200px) {
+      #missionPanel, #outputPanel { width: 340px; }
+    }
+    @media (max-width: 900px) {
+      #missionPanel { left: 10px; right: 10px; width: auto; top: auto; bottom: 10px; height: 45%; }
+      #outputPanel { display: none; }
+    }
+  </style>
+  
+  <!-- Dependencies -->
+  <script src="//unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <script src="//unpkg.com/satellite.js/dist/satellite.min.js"></script>
+  <script src="//unpkg.com/globe.gl@2.30.0"></script>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading">
+  <div class="spinner"></div>
+  <h1>
+    <svg width="32" height="32" viewBox="0 0 100 100" fill="none">
+      <circle cx="50" cy="50" r="42" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+      <circle cx="50" cy="50" r="28" stroke="currentColor" stroke-width="2" opacity="0.5"/>
+      <circle cx="50" cy="50" r="14" stroke="currentColor" stroke-width="2"/>
+      <circle cx="50" cy="18" r="5" fill="#00d4ff"/>
+    </svg>
+    MOSAIC COPILOT
+  </h1>
+  <div id="loadStatus">Initializing orbital systems...</div>
+</div>
+
+<!-- Globe -->
+<div id="globe"></div>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div class="logo">
+    <svg viewBox="0 0 100 100" fill="none">
+      <circle cx="50" cy="50" r="42" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+      <circle cx="50" cy="50" r="28" stroke="currentColor" stroke-width="2" opacity="0.5"/>
+      <circle cx="50" cy="50" r="14" stroke="currentColor" stroke-width="2"/>
+      <circle cx="50" cy="18" r="5" fill="#00d4ff"/>
+    </svg>
+    MOSAIC COPILOT
+  </div>
+  <div class="chip"><span class="dot" id="statusDot"></span> <span id="statusText">OPERATIONAL</span></div>
+  <div class="chip" id="timeDisplay">--:--:-- UTC</div>
+  <div class="spacer"></div>
+  <button class="btn" onclick="focusISS()">📍 ISS</button>
+  <button class="btn" onclick="resetView()">🌍 Reset</button>
+  <button class="btn" onclick="showConfig()">⚙ API</button>
+</div>
+
+<!-- Satellite info -->
+<div id="satInfo">
+  <div class="stat">🛰️ <span class="stat-value" id="satCount">--</span> tracked</div>
+  <div class="stat">⏱️ <span class="stat-value" id="simTime">--</span></div>
+  <div class="stat">🎯 <span class="stat-value" id="selectedSat">None</span></div>
+</div>
+
+<!-- Mission Planning Panel -->
+<div id="missionPanel">
+  <div class="panel-header">
+    <h3>Mission Intent</h3>
+  </div>
+  <div class="panel-body">
+    <textarea id="intentInput" class="intent-input" placeholder="Describe your mission objective...
+
+Example: Track ISS and alert if it passes within 50km of any other tracked object."></textarea>
+
+    <div class="suggestions">
+      <h4>Quick Commands</h4>
+      <div class="sugg-list" id="suggList"></div>
+    </div>
+
+    <div class="action-bar">
+      <button class="btn primary" onclick="execute()">▶ EXECUTE</button>
+      <button class="btn" onclick="clearAll()">CLEAR</button>
+    </div>
+  </div>
+</div>
+
+<!-- Output Panel -->
+<div id="outputPanel">
+  <div class="panel-header">
+    <h3>Mission Plan</h3>
+    <div class="spacer"></div>
+    <span class="status-badge ready" id="outputStatus">Ready</span>
+  </div>
+  <div class="panel-body">
+    <div class="mission-card" id="missionCard" style="display:none;">
+      <h4 id="missionTitle">--</h4>
+      <div class="mission-meta" id="missionMeta"></div>
+    </div>
+
+    <div class="output-section">
+      <div class="output-label">Execution Plan</div>
+      <div class="output-content" id="planOutput">Awaiting mission intent...</div>
+    </div>
+
+    <div class="output-section">
+      <div class="output-label">Mission Parameters</div>
+      <div class="output-content json" id="jsonOutput">{ }</div>
+    </div>
+  </div>
+</div>
+
+<!-- Config Modal -->
+<div id="configModal">
+  <div class="modal">
+    <h3>API Configuration</h3>
+    <label>
+      <div class="label-text">Endpoint</div>
+      <input id="apiEndpoint" value="https://api.openai.com/v1/chat/completions" />
+    </label>
+    <label>
+      <div class="label-text">API Key</div>
+      <input id="apiKey" type="password" placeholder="sk-..." />
+    </label>
+    <label>
+      <div class="label-text">Model</div>
+      <input id="modelName" value="gpt-4o" />
+    </label>
+    <div class="modal-actions">
+      <button class="btn primary" onclick="saveConfig()">Save</button>
+      <button class="btn" onclick="hideConfig()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ========== CONFIG ========== */
+const EARTH_RADIUS_KM = 6371;
+const SAT_SIZE = 60;
+const TIME_STEP = 3000;
+
+const SUGGESTIONS = [
+  { icon: "🛰", text: "Track ISS and report position every 5 minutes" },
+  { icon: "⚠️", text: "Alert if any object approaches within 100km of ISS" },
+  { icon: "🔍", text: "Identify all objects in retrograde orbit" },
+  { icon: "📡", text: "Calculate optimal comms window for ground station at 40°N, 74°W" },
+  { icon: "🎯", text: "Find closest approach between ISS and any Starlink satellite" },
+  { icon: "🔄", text: "Monitor debris field and flag collision risks above 1e-5" }
+];
+
+const SYSTEM_PROMPT = `You are Mosaic Copilot, an AI mission planning system for autonomous spacecraft operations. You have real-time awareness of orbital objects via TLE data.
+
+Current tracked objects include: ISS (ZARYA), Starlink satellites, various debris, and other LEO objects.
+
+When given a mission objective:
+1. Provide a concise mission summary
+2. List specific execution steps with timing
+3. Define monitoring parameters and alert thresholds
+4. Include contingency responses
+5. Output a structured JSON with mission_id, objective, assets, timeline, constraints, triggers, autonomy_level (1-5)
+
+Be operationally precise. Use proper aerospace terminology. Reference real tracked objects when relevant.`;
+
+/* ========== STATE ========== */
+let world, satData = [];
+let selectedSat = null;
+let config = {
+  endpoint: localStorage.getItem('mosaic_endpoint') || 'https://api.openai.com/v1/chat/completions',
+  apiKey: localStorage.getItem('mosaic_apikey') || '',
+  model: localStorage.getItem('mosaic_model') || 'gpt-4o'
+};
+
+/* ========== DOM ========== */
+const loading = document.getElementById('loading');
+const loadStatus = document.getElementById('loadStatus');
+const timeDisplay = document.getElementById('timeDisplay');
+const satCountEl = document.getElementById('satCount');
+const simTimeEl = document.getElementById('simTime');
+const selectedSatEl = document.getElementById('selectedSat');
+
+/* ========== GLOBE ========== */
+async function initGlobe() {
+  loadStatus.textContent = "Initializing 3D orbital view...";
+  
+  world = Globe()(document.getElementById('globe'))
+    .globeImageUrl('//unpkg.com/three-globe/example/img/earth-blue-marble.jpg')
+    .bumpImageUrl('//unpkg.com/three-globe/example/img/earth-topology.png')
+    .backgroundImageUrl('//unpkg.com/three-globe/example/img/night-sky.png')
+    .objectLat('lat')
+    .objectLng('lng')
+    .objectAltitude('alt')
+    .objectLabel(d => `<div style="background:rgba(0,0,0,0.8);padding:8px 12px;border-radius:8px;font-size:12px;">
+      <b style="color:#00d4ff;">${d.name}</b><br/>
+      Alt: ${(d.alt * EARTH_RADIUS_KM).toFixed(0)} km
+    </div>`);
+
+  // Custom satellite mesh
+  const satGeometry = new THREE.OctahedronGeometry(SAT_SIZE * world.getGlobeRadius() / EARTH_RADIUS_KM / 2, 0);
+  const satMaterial = new THREE.MeshLambertMaterial({ color: '#00d4ff', transparent: true, opacity: 0.8 });
+  world.objectThreeObject(d => {
+    const mesh = new THREE.Mesh(satGeometry, satMaterial.clone());
+    if (d.name.includes('ISS')) {
+      mesh.material.color.set('#3fb950');
+      mesh.scale.set(2, 2, 2);
+    } else if (d.name.includes('STARLINK')) {
+      mesh.material.color.set('#ffaa00');
+      mesh.material.opacity = 0.6;
+    } else if (d.name.includes('DEB')) {
+      mesh.material.color.set('#ff4444');
+      mesh.material.opacity = 0.4;
+    }
+    return mesh;
+  });
+
+  // Click handler
+  world.onObjectClick(d => {
+    selectedSat = d;
+    selectedSatEl.textContent = d.name;
+    world.pointOfView({ lat: d.lat, lng: d.lng, altitude: 1.2 }, 1000);
+  });
+
+  // Load TLE data
+  loadStatus.textContent = "Fetching orbital elements (TLE)...";
+  const rawData = await fetch('//globe.gl/example/datasets/space-track-leo.txt').then(r => r.text());
+  const tleData = rawData.replace(/\r/g, '').split(/\n(?=[^12])/).filter(d => d).map(tle => tle.split('\n'));
+  
+  loadStatus.textContent = "Propagating satellite positions...";
+  satData = tleData.map(([name, ...tle]) => {
+    try {
+      return {
+        satrec: satellite.twoline2satrec(...tle),
+        name: name.trim().replace(/^0 /, ''),
+        lat: 0, lng: 0, alt: 0.1
+      };
+    } catch { return null; }
+  }).filter(d => {
+    if (!d) return false;
+    try {
+      const eci = satellite.propagate(d.satrec, new Date());
+      return eci && eci.position;
+    } catch { return false; }
+  }).slice(0, 2000);
+
+  satCountEl.textContent = satData.length;
+
+  // Animation loop
+  let time = new Date();
+  (function tick() {
+    requestAnimationFrame(tick);
+    time = new Date(+time + TIME_STEP);
+    
+    const utc = time.toUTCString();
+    timeDisplay.textContent = utc.slice(17, 25) + ' UTC';
+    simTimeEl.textContent = utc.slice(5, 16);
+    
+    const gmst = satellite.gstime(time);
+    satData.forEach(d => {
+      try {
+        const eci = satellite.propagate(d.satrec, time);
+        if (eci && eci.position) {
+          const gdPos = satellite.eciToGeodetic(eci.position, gmst);
+          d.lat = satellite.radiansToDegrees(gdPos.latitude);
+          d.lng = satellite.radiansToDegrees(gdPos.longitude);
+          d.alt = gdPos.height / EARTH_RADIUS_KM;
+        }
+      } catch {}
+    });
+    
+    world.objectsData(satData.filter(d => d.lat !== undefined));
+    
+    // Update selected satellite display
+    if (selectedSat) {
+      selectedSatEl.textContent = `${selectedSat.name} (${(selectedSat.alt * EARTH_RADIUS_KM).toFixed(0)}km)`;
+    }
+  })();
+
+  world.pointOfView({ altitude: 2.5 });
+}
+
+/* ========== UI ========== */
+function renderSuggestions() {
+  const list = document.getElementById('suggList');
+  list.innerHTML = '';
+  SUGGESTIONS.forEach(s => {
+    const div = document.createElement('div');
+    div.className = 'sugg';
+    div.innerHTML = `<span class="sugg-icon">${s.icon}</span> ${s.text}`;
+    div.onclick = () => {
+      document.getElementById('intentInput').value = s.text;
+      execute();
+    };
+    list.appendChild(div);
+  });
+}
+
+function setStatus(status, text) {
+  const dot = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
+  const badge = document.getElementById('outputStatus');
+  
+  dot.className = 'dot' + (status === 'processing' ? ' warn' : '');
+  statusText.textContent = text;
+  badge.className = 'status-badge ' + status;
+  badge.textContent = status === 'processing' ? 'Processing' : 'Ready';
+}
+
+function focusISS() {
+  const iss = satData.find(s => s.name.includes('ISS') || s.name.includes('ZARYA'));
+  if (iss) {
+    selectedSat = iss;
+    selectedSatEl.textContent = iss.name;
+    world.pointOfView({ lat: iss.lat, lng: iss.lng, altitude: 1.2 }, 1000);
+  }
+}
+
+function resetView() {
+  selectedSat = null;
+  selectedSatEl.textContent = 'None';
+  world.pointOfView({ lat: 20, lng: 0, altitude: 2.5 }, 1000);
+}
+
+/* ========== AI EXECUTION ========== */
+async function execute() {
+  const intent = document.getElementById('intentInput').value.trim();
+  if (!intent) return;
+
+  if (!config.apiKey) {
+    alert('Configure API key first');
+    showConfig();
+    return;
+  }
+
+  setStatus('processing', 'PLANNING');
+  document.getElementById('planOutput').textContent = 'Analyzing mission parameters...';
+  document.getElementById('planOutput').classList.add('streaming');
+  document.getElementById('jsonOutput').textContent = '{ ... }';
+  document.getElementById('missionCard').style.display = 'none';
+
+  // Build context with current satellite data
+  const issData = satData.find(s => s.name.includes('ISS'));
+  const contextMsg = issData 
+    ? `Current ISS position: ${issData.lat.toFixed(2)}°N, ${issData.lng.toFixed(2)}°E, altitude ${(issData.alt * EARTH_RADIUS_KM).toFixed(0)}km. Total tracked objects: ${satData.length}.`
+    : `Total tracked objects: ${satData.length}.`;
+
+  try {
+    const response = await fetch(config.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: `${contextMsg}\n\nMission objective: ${intent}` }
+        ],
+        stream: true
+      })
+    });
+
+    if (!response.ok) throw new Error(`API error: ${response.status}`);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n').filter(line => line.startsWith('data: '));
+
+      for (const line of lines) {
+        const data = line.slice(6);
+        if (data === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(data);
+          const content = parsed.choices?.[0]?.delta?.content || '';
+          fullText += content;
+          document.getElementById('planOutput').textContent = fullText;
+        } catch {}
+      }
+    }
+
+    document.getElementById('planOutput').classList.remove('streaming');
+
+    // Extract JSON
+    const jsonMatch = fullText.match(/```json\n?([\s\S]*?)\n?```/) || fullText.match(/(\{[\s\S]*"mission_id"[\s\S]*\})/);
+    if (jsonMatch) {
+      try {
+        const jsonStr = jsonMatch[1] || jsonMatch[0];
+        const data = JSON.parse(jsonStr);
+        document.getElementById('jsonOutput').textContent = JSON.stringify(data, null, 2);
+        
+        document.getElementById('missionCard').style.display = 'block';
+        document.getElementById('missionTitle').textContent = data.objective || 'Mission Planned';
+        document.getElementById('missionMeta').innerHTML = `
+          <div class="meta-item"><div class="label">Mission ID</div><div class="value">${data.mission_id || 'N/A'}</div></div>
+          <div class="meta-item"><div class="label">Autonomy</div><div class="value">Level ${data.autonomy_level || '?'}/5</div></div>
+          <div class="meta-item"><div class="label">Assets</div><div class="value">${(data.assets || []).length} assigned</div></div>
+          <div class="meta-item"><div class="label">Phases</div><div class="value">${(data.timeline || []).length} phases</div></div>
+        `;
+      } catch {}
+    }
+
+    setStatus('ready', 'OPERATIONAL');
+
+  } catch (error) {
+    setStatus('ready', 'ERROR');
+    document.getElementById('planOutput').textContent = `Error: ${error.message}`;
+    document.getElementById('planOutput').classList.remove('streaming');
+  }
+}
+
+function clearAll() {
+  document.getElementById('intentInput').value = '';
+  document.getElementById('planOutput').textContent = 'Awaiting mission intent...';
+  document.getElementById('jsonOutput').textContent = '{ }';
+  document.getElementById('missionCard').style.display = 'none';
+}
+
+/* ========== CONFIG ========== */
+function showConfig() { document.getElementById('configModal').classList.add('show'); }
+function hideConfig() { document.getElementById('configModal').classList.remove('show'); }
+function saveConfig() {
+  config.endpoint = document.getElementById('apiEndpoint').value;
+  config.apiKey = document.getElementById('apiKey').value;
+  config.model = document.getElementById('modelName').value;
+  localStorage.setItem('mosaic_endpoint', config.endpoint);
+  localStorage.setItem('mosaic_apikey', config.apiKey);
+  localStorage.setItem('mosaic_model', config.model);
+  hideConfig();
+}
+
+/* ========== KEYBOARD ========== */
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') execute();
+  if (e.key === 'Escape') hideConfig();
+});
+
+/* ========== BOOT ========== */
+async function boot() {
+  try {
+    document.getElementById('apiEndpoint').value = config.endpoint;
+    document.getElementById('apiKey').value = config.apiKey;
+    document.getElementById('modelName').value = config.model;
+    
+    await initGlobe();
+    renderSuggestions();
+    
+    loadStatus.textContent = "All systems operational 🚀";
+    setTimeout(() => loading.classList.add('hide'), 500);
+  } catch (e) {
+    loadStatus.textContent = "Error: " + e.message;
+    console.error(e);
+  }
+}
+
+boot();
+</script>
+</body>
+</html>
